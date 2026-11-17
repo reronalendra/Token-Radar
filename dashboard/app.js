@@ -41,13 +41,15 @@
   // model did, so the check below agrees with board.json.)
   function impliedOf(row) {
     var m = DATA.model;
+    var weights = m.category_weights || {};
+    var categoryMult = weights[row.category] !== undefined ? weights[row.category] : 1;
     var growth = Math.min(m.growth_cap, Math.max(m.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * m.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? m.unknown_age_days : row.age_days;
     var maturity = m.maturity_floor + (Math.min(Math.max(age, 0), m.maturity_days) / m.maturity_days) * m.maturity_range;
     var breadth = 1 + Math.min(Math.max((row.chains || []).length - 1, 0), m.breadth_max_chains) * m.breadth_per_chain;
     var base = row.base_exact !== undefined ? row.base_exact : row.base_usd;
-    return Math.max(1, Math.round(base * growthMult * maturity * breadth));
+    return Math.max(1, Math.round(base * categoryMult * growthMult * maturity * breadth));
   }
 
   function el(tag, attrs) {
@@ -89,7 +91,7 @@
   document.getElementById('facts').innerHTML =
     '<div><dt>Protocols ranked</dt><dd>' + DATA.board_size + '</dd></div>' +
     '<div><dt>Watchlist covered</dt><dd>' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</dd></div>' +
-    '<div><dt>Early finds below the floor</dt><dd>' + DATA.early_size + '</dd></div>' +
+    '<div><dt>Early finds</dt><dd>' + DATA.early_size + ' · ' + DATA.early_below_floor + ' below floor</dd></div>' +
     '<div><dt>Combined implied value</dt><dd>' + fmtUsd(totalImplied) + '</dd></div>' +
     '<div><dt>Largest category</dt><dd>' + esc(topCat) + ' · ' + cats[topCat] + '</dd></div>';
 
@@ -140,6 +142,7 @@
       el('th', { class: 'num', text: '#' }),
       el('th', { text: 'Protocol' }),
       el('th', { text: 'Category' }),
+      el('th', { text: 'Chain' }),
       el('th', { class: 'num', text: 'TVL' }),
       el('th', { class: 'num', text: '7d' }),
       el('th', { class: 'num', text: 'Age' }),
@@ -152,6 +155,7 @@
         el('td', { class: 'num', text: String(r.rank) }),
         el('td', {}, el('div', { class: 'name' }, r.name + (isWatch(r) ? ' ' : '')), isWatch(r) ? el('span', { class: 'pill' }, 'Watchlist') : el('span', { class: 'sub' }, r.slug)),
         el('td', {}, el('span', { class: 'sub' }, r.category || '—')),
+        el('td', {}, el('span', { class: 'sub' }, (r.chains || []).length === 0 ? '—' : r.chains[0] + ((r.chains || []).length > 1 ? ' +' + ((r.chains || []).length - 1) : ''))),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: pct === null ? 'num' : 'num ' + (pct >= 0 ? 'pos' : 'neg'), text: fmtPct(pct) }),
         el('td', { class: 'num', text: fmtAge(r.age_days) }),
@@ -177,20 +181,29 @@
     table.appendChild(el('thead', {}, el('tr', {},
       el('th', { text: 'Protocol' }), el('th', { text: 'Category' }),
       el('th', { class: 'num', text: 'TVL' }), el('th', { class: 'num', text: 'Market cap' }),
+      el('th', { class: 'num', text: 'Mcap / TVL' }),
       el('th', { class: 'num', text: '7d' }))));
     var body = el('tbody', {});
+    var ratios = [];
     DATA.live.forEach(function (r) {
       var pct = r.change_7d;
+      var ratio = (r.mcap_usd !== null && r.mcap_usd !== undefined && r.tvl_usd > 0) ? r.mcap_usd / r.tvl_usd : null;
+      if (ratio !== null) ratios.push(ratio);
       body.appendChild(el('tr', {},
         el('td', {}, el('div', { class: 'name' }, r.name), el('span', { class: 'sub' }, r.slug)),
         el('td', {}, el('span', { class: 'sub' }, r.category || '—')),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
+        el('td', { class: 'num', text: ratio === null ? 'n/a' : ratio.toFixed(2) + '×' }),
         el('td', { class: pct === null ? 'num' : 'num ' + (pct >= 0 ? 'pos' : 'neg'), text: fmtPct(pct) })));
     });
     table.appendChild(body);
     app.appendChild(table);
-    app.appendChild(el('p', { class: 'count' }, 'These protocols already trade. Their market cap is the market\u2019s own value — the radar does not model it, and none of them is ranked on the pre-token board.'));
+    ratios.sort(function (a, b) { return a - b; });
+    var median = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
+    var allMedian = DATA.live_median_ratio;
+    app.appendChild(el('p', { class: 'count' }, 'These protocols already trade. Their market cap is the market\u2019s own value — the radar does not model it, and none of them is ranked on the pre-token board.' +
+      (allMedian !== null && allMedian !== undefined ? ' Across all ' + DATA.live_protocol_count + ' protocols in this snapshot whose token already trades, the median market cap / TVL is ' + allMedian.toFixed(2) + '× — that is why the model\u2019s base multiple is 0.30×: the market pays roughly thirty cents of value per dollar of TVL, more for some categories and less for others. This view shows only the 24 largest by market cap, so its own median (' + (median !== null ? median.toFixed(2) : 'n/a') + '×) runs higher.' : '')));
   }
 
   // ---- detail view ---------------------------------------------------------
@@ -215,6 +228,7 @@
     var bd = el('table', { class: 'breakdown' });
     var bbody = el('tbody', {});
     [['Base — TVL × 0.30', fmtUsd(row.base_usd)],
+     ['Category ×' + (row.category_multiplier !== undefined ? row.category_multiplier.toFixed(2) : '1.00'), row.category || 'Uncategorised'],
      ['Growth ×' + row.growth_multiplier.toFixed(4), fmtPct(row.change_7d)],
      ['Maturity ×' + row.maturity_multiplier.toFixed(4), fmtAge(row.age_days)],
      ['Breadth ×' + row.breadth_multiplier.toFixed(4), (row.chains || []).length + ' chain' + ((row.chains || []).length === 1 ? '' : 's')],
