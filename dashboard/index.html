@@ -17,15 +17,16 @@
   <section class="lede">
     <div>
       <h1>Which pre-token protocol would be worth the most if it launched a token today?</h1>
-      <p>Every protocol below has no token yet. Each one is scored from the snapshot's own figures — its TVL, its seven-day growth, how long it has run with no token, and how many chains it reaches — and ranked by the implied value that scoring gives. The implied value is this radar's own claim, not a prediction that a token will launch, or when.</p>
+      <p>Every protocol below has no token yet. Each one is scored from the snapshot's own figures — its TVL, what kind of protocol it is, its seven-day growth, how long it has run with no token, and how many chains it reaches — and ranked by the implied value that scoring gives. The implied value is this radar's own claim, not a prediction that a token will launch, or when.</p>
     </div>
     <dl class="facts" id="facts"></dl>
   </section>
 
   <section class="model" aria-label="How the model works">
     <h2>How the model works</h2>
-    <p class="formula">implied value = TVL &times; 0.30 &times; growth &times; maturity &times; breadth</p>
+    <p class="formula">implied value = TVL &times; 0.30 &times; category &times; growth &times; maturity &times; breadth</p>
     <ul class="model-terms">
+      <li><b>Category</b> — what the market pays per dollar of TVL for that kind of protocol, calibrated from the 119 protocols in this snapshot whose token already trades (median market cap / TVL per category, shrunk toward 1.0 and clamped to 0.50–1.50). Vault curators weigh 0.62, because their TVL is assets managed on top of other protocols; lending weighs 0.61 and DEXes 1.31.</li>
       <li><b>Growth</b> — 1 + clamp(7-day change, &minus;50%, +150%) &divide; 100 &times; 0.60. One wild week cannot crown a protocol.</li>
       <li><b>Maturity</b> — 0.55 + min(age, 4 years) &divide; 4 years &times; 0.45. Older protocols that still have no token have had longer to earn a launch.</li>
       <li><b>Breadth</b> — 1 + 0.03 per extra chain, up to 5. A protocol on several chains reaches more wallets.</li>
