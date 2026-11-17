@@ -168,6 +168,7 @@ export interface BoardRow {
     breadth_multiplier: number;
     age_days: number | null;
   };
+  base_exact: number;
   farm_steps: string[];
 }
 
@@ -433,7 +434,9 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const gas2 = second !== null ? gasFor(second) : gas;
   // Total capital actually at work: the main deposit plus the half-size
   // repeat on the second chain, when there is one. The hold step's cost
-  // must name this total, not just the main deposit.
+  // must name this total, not just the main deposit. The single-chain
+  // second action below deposits nothing, so for one-chain protocols the
+  // total is exactly the main deposit.
   const totalCapital = second !== null ? capital + Math.round(capital / 2) : capital;
   const steps: FarmStep[] = [
     {
@@ -451,8 +454,8 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     });
   } else {
     steps.push({
-      text: `Do one second qualifying action on ${chain} — a swap, a vote, or a second deposit of $25 — so the wallet shows more than a single deposit.`,
-      cost: `$25 of capital and ${gas}`,
+      text: `Do one second qualifying action on ${chain} — a small swap or a governance vote — so the wallet shows more than a single deposit.`,
+      cost: `only ${gas}`,
       time: '10 minutes',
     });
   }
