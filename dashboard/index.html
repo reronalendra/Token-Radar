@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols ranked by implied value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#board">Skip to the board</a>
+<div class="shell">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span class="brand-name">TOKEN RADAR</span></div>
+    <div class="top-meta" id="top-meta"></div>
+  </header>
+
+  <section class="lede">
+    <div>
+      <h1>Which pre-token protocol would be worth the most if it launched a token today?</h1>
+      <p>Every protocol below has no token yet. Each one is scored from the snapshot's own figures — its TVL, its seven-day growth, how long it has run with no token, and how many chains it reaches — and ranked by the implied value that scoring gives. The implied value is this radar's own claim, not a prediction that a token will launch, or when.</p>
+    </div>
+    <dl class="facts" id="facts"></dl>
+  </section>
+
+  <section class="model" aria-label="How the model works">
+    <h2>How the model works</h2>
+    <p class="formula">implied value = TVL &times; 0.30 &times; growth &times; maturity &times; breadth</p>
+    <ul class="model-terms">
+      <li><b>Growth</b> — 1 + clamp(7-day change, &minus;50%, +150%) &divide; 100 &times; 0.60. One wild week cannot crown a protocol.</li>
+      <li><b>Maturity</b> — 0.55 + min(age, 4 years) &divide; 4 years &times; 0.45. Older protocols that still have no token have had longer to earn a launch.</li>
+      <li><b>Breadth</b> — 1 + 0.03 per extra chain, up to 5. A protocol on several chains reaches more wallets.</li>
+      <li><b>Separation</b> — protocols whose token already trades are never ranked here. They sit apart, at their market's own value, on the Live tokens tab.</li>
+    </ul>
+  </section>
+
+  <nav class="tabs" aria-label="Board views">
+    <button type="button" class="tab is-active" data-tab="pre-token">Pre-token board</button>
+    <button type="button" class="tab" data-tab="live">Live tokens</button>
+  </nav>
+
+  <section class="controls" aria-label="Filter and sort the board">
+    <label class="field">Search
+      <input type="search" id="q" placeholder="Name or slug…" autocomplete="off">
+    </label>
+    <label class="field">Category
+      <select id="category"><option value="all">All categories</option></select>
+    </label>
+    <label class="field">Chain
+      <select id="chain"><option value="all">All chains</option></select>
+    </label>
+    <label class="field">Sort by
+      <select id="sort">
+        <option value="implied">Implied value</option>
+        <option value="tvl">TVL</option>
+        <option value="growth">7-day growth</option>
+        <option value="age">Age (oldest first)</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="watchlist-only"> Watchlist only</label>
+  </section>
+
+  <p class="count" id="count" aria-live="polite"></p>
+  <main id="board" tabindex="-1" aria-busy="true"></main>
+
+  <section class="detail" id="detail" hidden></section>
+
+  <footer class="foot">
+    <p>Method: the board ranks every pre-token protocol that passes the watchlist's own rule — no token, not a centralised exchange, not a versioned pool, not a wrapped, staked or bridged product. The watchlist (40 protocols at or above $50M TVL) is the floor, never the ceiling: 163 more protocols below and above it are ranked on the same terms.</p>
+    <p>Implied value is an estimate from public TVL figures, not financial advice and not a prediction of a launch. Farm plans describe on-chain actions with their cost and time; check the protocol's own site before you act, and never pay to claim an airdrop.</p>
+  </footer>
+</div>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
