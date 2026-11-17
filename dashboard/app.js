@@ -42,7 +42,11 @@
   function impliedOf(row) {
     var m = DATA.model;
     var weights = m.category_weights || {};
-    var categoryMult = weights[row.category] !== undefined ? weights[row.category] : 1;
+    // hasOwnProperty, not a plain lookup: a category named like an
+    // Object.prototype property (e.g. "toString") must weigh 1, not leak a
+    // function through and turn the recompute into NaN. A null category
+    // looks up "null", which is never an own key, so it also weighs 1.
+    var categoryMult = Object.prototype.hasOwnProperty.call(weights, row.category) ? weights[row.category] : 1;
     var growth = Math.min(m.growth_cap, Math.max(m.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * m.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? m.unknown_age_days : row.age_days;
@@ -187,7 +191,7 @@
     var ratios = [];
     DATA.live.forEach(function (r) {
       var pct = r.change_7d;
-      var ratio = (r.mcap_usd !== null && r.mcap_usd !== undefined && r.tvl_usd > 0) ? r.mcap_usd / r.tvl_usd : null;
+      var ratio = (r.mcap_usd !== null && r.mcap_usd !== undefined && r.mcap_usd > 0 && r.tvl_usd > 0) ? r.mcap_usd / r.tvl_usd : null;
       if (ratio !== null) ratios.push(ratio);
       body.appendChild(el('tr', {},
         el('td', {}, el('div', { class: 'name' }, r.name), el('span', { class: 'sub' }, r.slug)),
@@ -200,7 +204,14 @@
     table.appendChild(body);
     app.appendChild(table);
     ratios.sort(function (a, b) { return a - b; });
-    var median = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
+    // Same median as the model: for an even count, the average of the two
+    // middle values (the 24 rows here are even, so a single middle element
+    // would read 1.52x instead of the true 1.43x).
+    var median = null;
+    if (ratios.length) {
+      var mid = Math.floor(ratios.length / 2);
+      median = ratios.length % 2 === 1 ? ratios[mid] : (ratios[mid - 1] + ratios[mid]) / 2;
+    }
     var allMedian = DATA.live_median_ratio;
     app.appendChild(el('p', { class: 'count' }, 'These protocols already trade. Their market cap is the market\u2019s own value — the radar does not model it, and none of them is ranked on the pre-token board.' +
       (allMedian !== null && allMedian !== undefined ? ' Across all ' + DATA.live_protocol_count + ' protocols in this snapshot whose token already trades, the median market cap / TVL is ' + allMedian.toFixed(2) + '× — that is why the model\u2019s base multiple is 0.30×: the market pays roughly thirty cents of value per dollar of TVL, more for some categories and less for others. This view shows only the 24 largest by market cap, so its own median (' + (median !== null ? median.toFixed(2) : 'n/a') + '×) runs higher.' : '')));
