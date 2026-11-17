@@ -1,4 +1,4 @@
-// Token Radar model (radar-2): snapshot in, ranked board out.
+// Token Radar model (radar-3): snapshot in, ranked board out.
 //
 // The board ranks every protocol the radar may rank: pre-token (no market
 // cap, no CoinGecko id, no symbol), not a centralised exchange, not a
@@ -123,10 +123,13 @@ export const MODEL: ModelConstants = {
   },
 };
 
-/** The category weight for one protocol; unlisted categories weigh 1.0. */
+/** The category weight for one protocol; unlisted categories weigh 1.0. The
+ * lookup is guarded with hasOwnProperty so a category named like an
+ * Object.prototype property (e.g. "toString") cannot leak a function
+ * through and turn the implied value into NaN. */
 export function categoryWeight(category: string | null, model: ModelConstants = MODEL): number {
   if (category === null) return 1;
-  return model.category_weights[category] ?? 1;
+  return Object.prototype.hasOwnProperty.call(model.category_weights, category) ? model.category_weights[category]! : 1;
 }
 
 export const MODEL_VERSION = 'radar-3';
@@ -428,6 +431,10 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const action = actionFor(p, capital, chain);
   const gas = gasFor(chain);
   const gas2 = second !== null ? gasFor(second) : gas;
+  // Total capital actually at work: the main deposit plus the half-size
+  // repeat on the second chain, when there is one. The hold step's cost
+  // must name this total, not just the main deposit.
+  const totalCapital = second !== null ? capital + Math.round(capital / 2) : capital;
   const steps: FarmStep[] = [
     {
       text: `Open a fresh wallet that holds only this farm's funds, write its seed phrase on paper, and fund it with $${capital + 10} of USDC on ${chain}.`,
@@ -457,7 +464,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     },
     {
       text: `Hold every position for at least ${hold} days so the activity is counted in more than one snapshot.`,
-      cost: `the $${capital} stays in the position`,
+      cost: `the $${totalCapital} stays in the position${second !== null ? 's' : ''}`,
       time: `${hold} days`,
     },
     {
@@ -569,7 +576,7 @@ export function parseSnapshot(text: string): Snapshot {
   const protocols = o.protocols.map((v, i) => {
     if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new SnapshotError(`snapshot.json's protocol ${i} is not an object`);
     const p = v as Record<string, unknown>;
-    if (typeof p.slug !== 'string' || typeof p.name !== 'string' || typeof p.tvl_usd !== 'number' || !Number.isFinite(p.tvl_usd)) {
+    if (typeof p.slug !== 'string' || typeof p.name !== 'string' || typeof p.tvl_usd !== 'number' || !Number.isFinite(p.tvl_usd) || p.tvl_usd < 0) {
       throw new SnapshotError(`snapshot.json's protocol ${i} lacks a slug, a name or a TVL`);
     }
     return {
