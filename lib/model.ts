@@ -13,20 +13,48 @@
 // own figures, the same function for every row, no name ever special-cased:
 //
 //   base      = tvl_usd x 0.30
+//   category  = weight for the protocol's category (see CATEGORY_WEIGHTS)
 //   growth    = clamp(change_7d, -50, +150) per cent (unknown: 0)
 //   growthMul = 1 + growth / 100 x 0.60
 //   maturity  = 0.55 + min(age_days, 1460) / 1460 x 0.45 (age unknown: 180)
 //   breadth   = 1 + 0.03 x min(chains - 1, 5)
-//   implied   = max(1, round(base x growthMul x maturity x breadth))
+//   implied   = max(1, round(base x category x growthMul x maturity x breadth))
 //
-// Why these terms: TVL is the protocol's size today; seven-day growth is
-// its momentum; age with no token is how long it has built without one
-// (older, still tokenless protocols have had longer to earn a launch, so
-// maturity rises with age and flattens after four years); chain breadth is
-// distribution — a protocol live on several chains reaches more wallets
-// than a single-chain one. Growth is clamped so one wild week cannot
-// crown a protocol, and maturity never drops below 0.55, so a young
-// protocol with real TVL is not written off.
+// Why these terms: TVL is the protocol's size today; the category weight
+// is what the market actually pays per dollar of TVL for that kind of
+// protocol (see below); seven-day growth is its momentum; age with no
+// token is how long it has built without one (older, still tokenless
+// protocols have had longer to earn a launch, so maturity rises with age
+// and flattens after four years); chain breadth is distribution — a
+// protocol live on several chains reaches more wallets than a single-chain
+// one. Growth is clamped so one wild week cannot crown a protocol, and
+// maturity never drops below 0.55, so a young protocol with real TVL is
+// not written off.
+//
+// Calibration of the category weights (from this snapshot, not guessed):
+// 119 protocols in the snapshot already trade with a positive market cap,
+// so each has a market cap and a TVL, and the ratio mcap_usd / tvl_usd
+// is what the market pays per dollar of TVL. The overall median ratio is
+// 0.246, close to the base multiple 0.30. (Tokens with mcap 0 — dead or
+// unpriced — and the one mcap of -1, a missing-data sentinel, are left
+// out: a ratio of 0 or below is not a valuation.) Per category, weight =
+// median ratio / 0.246, shrunk toward 1.0 by n / (n + 3) for a category
+// with n live samples, then clamped to [0.50, 1.50] so one wild sample
+// cannot crown or bury a category. Categories with fewer than two live
+// samples keep 1.0: a single sample is noise (the only live "Prediction
+// Market" is a token worth 400x its protocol's TVL; the only live "Risk
+// Curators" entry is an oracle miscategorised with $11.8M TVL). Two
+// exceptions are grouped by economics, not by label: "Risk Curators" and
+// "Onchain Capital Allocator" are both vault curators whose TVL is assets
+// managed on top of other protocols, so both take the allocator weight
+// 0.62 — the two genuine allocator samples (concrete 0.019, grove-finance
+// 0.006) sit about 20x below the overall median. The fitted weights:
+// Lending 0.61 (n=15, median 0.132), Dexs 1.31 (n=11, 0.342), Yield 0.83
+// (n=9, 0.191), RWA 1.09 (n=9, 0.275), Basis Trading 1.50 (n=7, 0.654,
+// capped), Yield Aggregator 0.78 (n=4, 0.151), CDP 0.84 (n=3, 0.169),
+// Indexes 0.80 (n=3, 0.148), Derivatives 1.50 (n=2, 2.162, capped),
+// Staking Pool 0.60 (n=2, 0.002), Restaking 0.64 (n=2, 0.025), Payments
+// 0.89 (n=2, 0.181), Cross Chain Bridge 1.50 (n=4, 1.220, capped).
 
 export interface SnapshotProtocol {
   slug: string;
@@ -61,6 +89,8 @@ export interface ModelConstants {
   unknown_age_days: number;
   breadth_per_chain: number;
   breadth_max_chains: number;
+  /** Per-category valuation weight; a category not listed here weighs 1.0. */
+  category_weights: Record<string, number>;
 }
 
 export const MODEL: ModelConstants = {
@@ -74,9 +104,32 @@ export const MODEL: ModelConstants = {
   unknown_age_days: 180,
   breadth_per_chain: 0.03,
   breadth_max_chains: 5,
+  category_weights: {
+    'Risk Curators': 0.62,
+    'Onchain Capital Allocator': 0.62,
+    Dexs: 1.31,
+    RWA: 1.09,
+    Lending: 0.61,
+    Yield: 0.83,
+    Derivatives: 1.5,
+    CDP: 0.84,
+    'Yield Aggregator': 0.78,
+    'Basis Trading': 1.5,
+    'Staking Pool': 0.6,
+    Restaking: 0.64,
+    Payments: 0.89,
+    Indexes: 0.8,
+    'Cross Chain Bridge': 1.5,
+  },
 };
 
-export const MODEL_VERSION = 'radar-2';
+/** The category weight for one protocol; unlisted categories weigh 1.0. */
+export function categoryWeight(category: string | null, model: ModelConstants = MODEL): number {
+  if (category === null) return 1;
+  return model.category_weights[category] ?? 1;
+}
+
+export const MODEL_VERSION = 'radar-3';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -105,6 +158,7 @@ export interface BoardRow {
   model: {
     base_usd: number;
     base_multiple: number;
+    category_multiplier: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -126,6 +180,7 @@ export interface RadarRow {
   listed_at: string | null;
   age_days: number | null;
   implied_value_usd: number;
+  category_multiplier: number;
   growth_multiplier: number;
   maturity_multiplier: number;
   breadth_multiplier: number;
@@ -154,7 +209,12 @@ export interface RadarData {
   watchlist: string[];
   board_size: number;
   early_size: number;
+  early_below_floor: number;
   live_size: number;
+  /** Median mcap_usd / tvl_usd across ALL live (token-trading) protocols in the snapshot, not just the 24 shown. */
+  live_median_ratio: number;
+  /** How many live protocols that median is computed over. */
+  live_protocol_count: number;
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -185,8 +245,9 @@ export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
   model: ModelConstants,
-): { implied: number; base: number; baseExact: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
+): { implied: number; base: number; baseExact: number; categoryMult: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
+  const categoryMult = categoryWeight(protocol.category, model);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, finite(protocol.change_7d, 0)));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
@@ -195,11 +256,12 @@ export function impliedValue(
   const extraChains = Math.max(0, Math.min(protocol.chains.length - 1, model.breadth_max_chains));
   const breadthMult = 1 + extraChains * model.breadth_per_chain;
   const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult * breadthMult));
+  const implied = Math.max(1, Math.round(base * categoryMult * growthMult * maturityMult * breadthMult));
   return {
     implied,
     base: Math.round(base),
     baseExact: base,
+    categoryMult,
     growthPct,
     growthMult,
     maturityMult,
@@ -263,6 +325,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     model: {
       base_usd: s.base,
       base_multiple: model.base_multiple,
+      category_multiplier: round4(s.categoryMult),
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
@@ -327,11 +390,35 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open for the full hold.`;
 }
 
+/** A rough per-transaction gas cost for one farm action, by chain. */
+function gasFor(chain: string): string {
+  const c = chain.toLowerCase();
+  if (c.includes('ethereum') || c.includes('bitcoin')) return 'about $8 of gas';
+  if (
+    c.includes('solana') ||
+    c.includes('sui') ||
+    c.includes('aptos') ||
+    c.includes('base') ||
+    c.includes('arbitrum') ||
+    c.includes('optimism') ||
+    c.includes('polygon') ||
+    c.includes('binance') ||
+    c.includes('monad') ||
+    c.includes('hyperliquid')
+  ) {
+    return 'about $0.50 of gas';
+  }
+  return 'about $2 of gas';
+}
+
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a
  * time. The plan is derived from the protocol's own record (category,
  * chains, TVL, age) — never from a hand-written list of names — so two
- * protocols in different categories genuinely farm differently.
+ * protocols in different categories genuinely farm differently. Gas is
+ * priced from the protocol's own main chain, not a flat figure: a
+ * transaction on Ethereum or Bitcoin costs far more than one on Solana,
+ * Base or Arbitrum.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -339,31 +426,33 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
   const action = actionFor(p, capital, chain);
+  const gas = gasFor(chain);
+  const gas2 = second !== null ? gasFor(second) : gas;
   const steps: FarmStep[] = [
     {
       text: `Open a fresh wallet that holds only this farm's funds, write its seed phrase on paper, and fund it with $${capital + 10} of USDC on ${chain}.`,
-      cost: `about $5 of gas for the first transaction`,
+      cost: `${gas} for the first transaction`,
       time: '10 minutes',
     },
-    { text: action, cost: `$${capital} of capital and about $${capital >= 250 ? 10 : 5} of gas`, time: '20 minutes to set up' },
+    { text: action, cost: `$${capital} of capital and ${gas}`, time: '20 minutes to set up' },
   ];
   if (second !== null) {
     steps.push({
       text: `Repeat the same position with $${Math.round(capital / 2)} on ${second} so the activity shows on a second chain, not only on ${chain}.`,
-      cost: `$${Math.round(capital / 2)} of capital and about $4 of gas`,
+      cost: `$${Math.round(capital / 2)} of capital and ${gas2}`,
       time: '15 minutes',
     });
   } else {
     steps.push({
       text: `Do one second qualifying action on ${chain} — a swap, a vote, or a second deposit of $25 — so the wallet shows more than a single deposit.`,
-      cost: '$25 of capital and about $2 of gas',
+      cost: `$25 of capital and ${gas}`,
       time: '10 minutes',
     });
   }
   steps.push(
     {
       text: `Once a week, make one small on-chain action on ${chain}: a $10 deposit, a claim, or a governance vote if one is live.`,
-      cost: 'about $2 of gas a week',
+      cost: `${gas} a week`,
       time: '10 minutes a week',
     },
     {
@@ -383,6 +472,18 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     },
   );
   return steps;
+}
+
+/** Median mcap / TVL across every live (token-trading, non-CEX) protocol in the snapshot. Tokens with a zero market cap (dead or unpriced) are left out: a ratio of 0 is not a valuation. */
+export function liveMedianRatio(snapshot: Snapshot): { median: number; count: number } {
+  const ratios = snapshot.protocols
+    .filter((p) => !isPreToken(p) && p.category !== 'CEX' && p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0)
+    .map((p) => p.mcap_usd! / p.tvl_usd)
+    .sort((a, b) => a - b);
+  if (ratios.length === 0) return { median: 0, count: 0 };
+  const mid = Math.floor(ratios.length / 2);
+  const median = ratios.length % 2 === 1 ? ratios[mid]! : (ratios[mid - 1]! + ratios[mid]!) / 2;
+  return { median, count: ratios.length };
 }
 
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
@@ -415,6 +516,7 @@ export function radarRow(row: BoardRow): RadarRow {
     listed_at: row.listed_at,
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
+    category_multiplier: row.model.category_multiplier,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
@@ -427,7 +529,9 @@ export function radarRow(row: BoardRow): RadarRow {
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
-  const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
+  const early = board.filter((r) => !snapshot.watchlist.includes(r.slug));
+  const earlyBelowFloor = early.filter((r) => r.tvl_usd < snapshot.floor_usd).length;
+  const liveMedian = liveMedianRatio(snapshot);
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -437,8 +541,11 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     watchlist_size: snapshot.watchlist.length,
     watchlist: snapshot.watchlist,
     board_size: board.length,
-    early_size: early,
+    early_size: early.length,
+    early_below_floor: earlyBelowFloor,
     live_size: live.length,
+    live_median_ratio: Math.round(liveMedian.median * 1000) / 1000,
+    live_protocol_count: liveMedian.count,
     rows: board.map(radarRow),
     live,
   };
